@@ -14,7 +14,6 @@ export interface Priority {
 
 interface PriorityStore {
   priorities: Priority[];
-  loading: boolean;
   error: string | null;
   fetchPriorities: () => Promise<void>;
   addPriority: (priority: Omit<Priority, 'id' | 'created_at' | 'user_id'>) => Promise<void>;
@@ -22,14 +21,13 @@ interface PriorityStore {
   deletePriority: (id: string) => Promise<void>;
 }
 
-export const usePriorityStore = create<PriorityStore>((set) => ({
+export const usePriorityStore = create<PriorityStore>((set, get) => ({
   priorities: [],
-  loading: false,
   error: null,
 
   fetchPriorities: async () => {
     try {
-      set({ loading: true, error: null });
+      set({ error: null });
 
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Nicht eingeloggt');
@@ -58,15 +56,11 @@ export const usePriorityStore = create<PriorityStore>((set) => ({
         description: `Fehler beim Laden der Prioritäten: ${errorMessage}`,
         variant: "destructive",
       });
-    } finally {
-      set({ loading: false });
     }
   },
 
   addPriority: async (priority) => {
     try {
-      set({ loading: true, error: null });
-
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Nicht eingeloggt');
 
@@ -95,15 +89,12 @@ export const usePriorityStore = create<PriorityStore>((set) => ({
         description: `Fehler beim Hinzufügen der Priorität: ${errorMessage}`,
         variant: "destructive",
       });
-    } finally {
-      set({ loading: false });
+      throw error;
     }
   },
 
   updatePriority: async (id, updates) => {
     try {
-      set({ loading: true, error: null });
-
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Nicht eingeloggt');
 
@@ -136,15 +127,12 @@ export const usePriorityStore = create<PriorityStore>((set) => ({
         description: `Fehler beim Aktualisieren der Priorität: ${errorMessage}`,
         variant: "destructive",
       });
-    } finally {
-      set({ loading: false });
+      throw error;
     }
   },
 
   deletePriority: async (id: string) => {
     try {
-      set({ loading: true, error: null });
-
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Nicht eingeloggt');
 
@@ -173,8 +161,7 @@ export const usePriorityStore = create<PriorityStore>((set) => ({
         description: `Fehler beim Löschen der Priorität: ${errorMessage}`,
         variant: "destructive",
       });
-    } finally {
-      set({ loading: false });
+      throw error;
     }
   }
 }));

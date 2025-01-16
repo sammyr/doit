@@ -27,6 +27,15 @@ import {
 } from "@/components/ui/alert-dialog";
 import { toast } from "@/components/ui/use-toast";
 
+// Hilfsfunktion für die Generierung einer UUID
+function generateUUID() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
+
 export default function PrioritiesPage() {
   const { 
     priorities, 
@@ -40,6 +49,11 @@ export default function PrioritiesPage() {
   
   const [newPriorityName, setNewPriorityName] = useState("");
   const [priorityToDelete, setPriorityToDelete] = useState<string | null>(null);
+  const [localPriorities, setLocalPriorities] = useState<Priority[]>([]);
+
+  useEffect(() => {
+    setLocalPriorities(priorities);
+  }, [priorities]);
 
   useEffect(() => {
     fetchPriorities();
@@ -56,34 +70,102 @@ export default function PrioritiesPage() {
     }
 
     try {
+      console.log('Starte Priorität-Erstellung mit:', newPriorityName);
+
+      const tempId = generateUUID();
+      const newPriority = {
+        id: tempId,
+        name: newPriorityName,
+        email_notification: false,
+        sms_notification: false,
+        whatsapp_notification: false,
+        created_at: new Date().toISOString(),
+        user_id: '' // wird vom Server gesetzt
+      };
+      
+      // Optimistisches Update
+      setLocalPriorities(prev => [...prev, newPriority]);
+      setNewPriorityName("");
+
+      console.log('Sende an Store:', {
+        name: newPriorityName,
+        email_notification: false,
+        sms_notification: false,
+        whatsapp_notification: false,
+      });
+
       await addPriority({
         name: newPriorityName,
         email_notification: false,
         sms_notification: false,
         whatsapp_notification: false,
       });
-      setNewPriorityName("");
-    } catch (error) {
-      // Fehler wird bereits im Store behandelt
+
+      toast({
+        title: "Erfolg",
+        description: "Priorität wurde erfolgreich erstellt",
+      });
+    } catch (error: any) {
+      console.error('Fehler beim Erstellen der Priorität:', error);
+      setLocalPriorities(priorities);
+      toast({
+        title: "Fehler",
+        description: "Priorität konnte nicht erstellt werden: " + error.message,
+        variant: "destructive",
+      });
     }
   };
 
   const handleDelete = async () => {
     if (priorityToDelete !== null) {
       try {
-        await deletePriority(priorityToDelete);
+        setLocalPriorities(prev => 
+          prev.filter(p => p.id !== priorityToDelete)
+        );
         setPriorityToDelete(null);
-      } catch (error) {
-        // Fehler wird bereits im Store behandelt
+
+        await deletePriority(priorityToDelete);
+        
+        toast({
+          title: "Erfolg",
+          description: "Priorität wurde erfolgreich gelöscht",
+        });
+      } catch (error: any) {
+        console.error('Fehler beim Löschen der Priorität:', error);
+        setLocalPriorities(priorities);
+        toast({
+          title: "Fehler",
+          description: "Priorität konnte nicht gelöscht werden: " + error.message,
+          variant: "destructive",
+        });
       }
     }
   };
 
   const handleUpdatePriority = async (id: string, updates: Partial<Priority>) => {
     try {
+      console.log('Aktualisiere Priorität:', { id, updates });
+
+      setLocalPriorities(prev =>
+        prev.map(priority =>
+          priority.id === id ? { ...priority, ...updates } : priority
+        )
+      );
+
       await updatePriority(id, updates);
-    } catch (error) {
-      // Fehler wird bereits im Store behandelt
+
+      toast({
+        title: "Erfolg",
+        description: "Priorität wurde erfolgreich aktualisiert",
+      });
+    } catch (error: any) {
+      console.error('Fehler beim Aktualisieren der Priorität:', error);
+      setLocalPriorities(priorities);
+      toast({
+        title: "Fehler",
+        description: "Priorität konnte nicht aktualisiert werden: " + error.message,
+        variant: "destructive",
+      });
     }
   };
 
@@ -114,21 +196,21 @@ export default function PrioritiesPage() {
           onChange={(e) => setNewPriorityName(e.target.value)}
           className="max-w-xs"
         />
-        <Button onClick={handleAddPriority}>Hinzufügen</Button>
+        <Button onClick={handleAddPriority} disabled={loading}>Hinzufügen</Button>
       </div>
 
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>name</TableHead>
-            <TableHead>email_notification</TableHead>
-            <TableHead>sms_notification</TableHead>
-            <TableHead>whatsapp_notification</TableHead>
-            <TableHead>aktionen</TableHead>
+            <TableHead>Name</TableHead>
+            <TableHead>E-Mail Benachrichtigung</TableHead>
+            <TableHead>SMS Benachrichtigung</TableHead>
+            <TableHead>WhatsApp Benachrichtigung</TableHead>
+            <TableHead>Aktionen</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {priorities.map((priority) => (
+          {localPriorities.map((priority) => (
             <TableRow key={priority.id}>
               <TableCell>
                 <Input
@@ -181,10 +263,10 @@ export default function PrioritiesPage() {
                   </AlertDialogTrigger>
                   <AlertDialogContent>
                     <AlertDialogHeader>
-                      <AlertDialogTitle>Priorität löschen</AlertDialogTitle>
+                      <AlertDialogTitle>Sind Sie sicher?</AlertDialogTitle>
                       <AlertDialogDescription>
-                        Sind Sie sicher, dass Sie diese Priorität löschen möchten?
                         Diese Aktion kann nicht rückgängig gemacht werden.
+                        Die Priorität wird dauerhaft gelöscht.
                       </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>

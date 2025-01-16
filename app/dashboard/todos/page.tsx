@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Table,
   TableBody,
@@ -10,7 +11,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -29,136 +29,163 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "@/components/ui/use-toast";
 import { Card } from "@/components/ui/card";
 
+// Hilfsfunktion für die Generierung einer UUID
+function generateUUID() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
+
 export default function TodosPage() {
   const { currentUser } = useUserStore();
   const { priorities, fetchPriorities } = usePriorityStore();
-  const { todos, loading, error, fetchTodos, addTodo, updateTodo, deleteTodo } = useTodoStore();
+  const { 
+    todos, 
+    error, 
+    fetchTodos, 
+    addTodo, 
+    updateTodo, 
+    deleteTodo,
+    completeTodo 
+  } = useTodoStore();
   const { users, fetchUsers } = useUserStore();
   
   const [description, setDescription] = useState("");
+  const [selectedDate, setSelectedDate] = useState<Date>();
   const [priority, setPriority] = useState("");
   const [receiver, setReceiver] = useState("");
-  const [selectedDate, setSelectedDate] = useState<Date>();
+  const [todoToDelete, setTodoToDelete] = useState<string | null>(null);
+  const [localTodos, setLocalTodos] = useState<Todo[]>([]);
+
+  // Initialisiere localTodos wenn sich todos ändert
+  useEffect(() => {
+    setLocalTodos(todos);
+  }, [todos]);
 
   useEffect(() => {
-    const initializeData = async () => {
-      try {
-        console.log("Initialisiere Daten...");
-        const results = await Promise.all([
-          fetchTodos(),
-          fetchUsers(),
-          fetchPriorities()
-        ]);
-        console.log("Daten geladen:", {
-          users: results[1],
-          priorities: results[2]
-        });
-      } catch (error) {
-        console.error("Fehler beim Laden der Daten:", error);
-        toast({
-          title: "Fehler",
-          description: "Daten konnten nicht geladen werden",
-          variant: "destructive",
-        });
-      }
-    };
-
-    initializeData();
+    fetchTodos();
+    fetchUsers();
+    fetchPriorities();
   }, [fetchTodos, fetchUsers, fetchPriorities]);
 
   const handleAddTodo = async () => {
-    if (!description || !selectedDate || !priority || !receiver || 
-        priority === "_no_priority" || receiver === "_no_users") {
-      toast({
-        title: "Fehler",
-        description: "Bitte fülle alle Felder korrekt aus",
-        variant: "destructive",
-      });
-      return;
-    }
-
     try {
-      console.log('Erstelle neues Todo:', {
-        description,
-        deadline: selectedDate.toISOString(),
-        priority,
-        receiver,
-        status: "active"
-      });
-
-      await addTodo({
-        description,
-        deadline: selectedDate.toISOString(),
-        priority,
-        receiver,
-        status: "active",
-      });
-
-      resetForm();
-      toast({
-        title: "Erfolg",
-        description: "Todo wurde erstellt",
-      });
-    } catch (error: any) {
-      console.error('Fehler beim Erstellen des Todos:', error);
-      toast({
-        title: "Fehler",
-        description: error.message || "Todo konnte nicht erstellt werden",
-        variant: "destructive",
-      });
-    }
-  };
-
-  const resetForm = () => {
-    setDescription("");
-    setSelectedDate(undefined);
-    setPriority("");
-    setReceiver("");
-  };
-
-  const handleDelete = async (id: string) => {
-    if (window.confirm("Möchtest du dieses Todo wirklich löschen?")) {
-      try {
-        await deleteTodo(id);
-        toast({
-          title: "Erfolg",
-          description: "Todo wurde gelöscht",
-        });
-      } catch (error) {
-        console.error("Fehler beim Löschen des Todos:", error);
+      if (!description.trim()) {
         toast({
           title: "Fehler",
-          description: "Todo konnte nicht gelöscht werden",
+          description: "Bitte geben Sie eine Beschreibung ein",
           variant: "destructive",
         });
+        return;
+      }
+
+      console.log('Starte Todo-Erstellung mit:', { 
+        description,
+        deadline: selectedDate?.toISOString(),
+        priority,
+        receiver,
+        status: 'active'
+      });
+
+      // Optimistisches Update
+      const tempId = generateUUID();
+      const tempTodo = {
+        id: tempId,
+        description,
+        deadline: selectedDate?.toISOString(),
+        priority,
+        receiver,
+        status: 'active',
+        created_at: new Date().toISOString(),
+        user_id: '' // wird vom Server gesetzt
+      };
+      
+      setLocalTodos(prev => [tempTodo, ...prev]);
+
+      // Formular zurücksetzen
+      setDescription("");
+      setSelectedDate(undefined);
+      setPriority("");
+      setReceiver("");
+
+      const newTodo = {
+        description,
+        deadline: selectedDate?.toISOString(),
+        priority: priority || undefined,
+        receiver: receiver || undefined,
+        status: 'active'
+      };
+
+      console.log('Sende an Store:', newTodo); 
+
+      await addTodo(newTodo);
+
+      toast({
+        title: "Erfolg",
+        description: "Todo wurde erfolgreich erstellt",
+      });
+    } catch (error: any) {
+      console.error('Fehler beim Erstellen des Todos:', error); 
+      // Bei Fehler den optimistischen Update rückgängig machen
+      setLocalTodos(todos);
+      toast({
+        title: "Fehler",
+        description: "Todo konnte nicht erstellt werden: " + error.message,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleUpdateTodo = async (id: string, updates: Partial<Todo>) => {
+    try {
+      // Optimistisches Update
+      setLocalTodos(prev =>
+        prev.map(todo =>
+          todo.id === id ? { ...todo, ...updates } : todo
+        )
+      );
+
+      await updateTodo(id, updates);
+    } catch (error) {
+      // Bei Fehler den optimistischen Update rückgängig machen
+      setLocalTodos(todos);
+    }
+  };
+
+  const handleDeleteTodo = async () => {
+    if (todoToDelete !== null) {
+      try {
+        // Optimistisches Update
+        setLocalTodos(prev => 
+          prev.filter(todo => todo.id !== todoToDelete)
+        );
+        setTodoToDelete(null);
+
+        await deleteTodo(todoToDelete);
+      } catch (error) {
+        // Bei Fehler den optimistischen Update rückgängig machen
+        setLocalTodos(todos);
       }
     }
   };
 
-  const handleStatusChange = async (id: string, newStatus: "active" | "inactive") => {
+  const handleCompleteTodo = async (id: string) => {
     try {
-      await updateTodo(id, { status: newStatus });
-      toast({
-        title: "Erfolg",
-        description: `Todo wurde als ${newStatus === "active" ? "aktiv" : "inaktiv"} markiert`,
-      });
+      // Optimistisches Update
+      setLocalTodos(prev =>
+        prev.map(todo =>
+          todo.id === id ? { ...todo, status: 'completed' } : todo
+        )
+      );
+
+      await completeTodo(id);
     } catch (error) {
-      console.error("Fehler beim Aktualisieren des Status:", error);
-      toast({
-        title: "Fehler",
-        description: "Status konnte nicht aktualisiert werden",
-        variant: "destructive",
-      });
+      // Bei Fehler den optimistischen Update rückgängig machen
+      setLocalTodos(todos);
     }
   };
-
-  if (loading) {
-    return (
-      <div className="flex h-screen items-center justify-center">
-        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-gray-900"></div>
-      </div>
-    );
-  }
 
   if (error) {
     return (
@@ -240,46 +267,114 @@ export default function TodosPage() {
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead className="w-[50px]">Status</TableHead>
-            <TableHead className="w-[300px]">Beschreibung</TableHead>
-            <TableHead className="w-[200px]">Deadline</TableHead>
-            <TableHead className="w-[150px]">Priorität</TableHead>
-            <TableHead className="w-[250px]">Empfänger</TableHead>
-            <TableHead className="w-[100px]">Aktionen</TableHead>
+            <TableHead>Beschreibung</TableHead>
+            <TableHead>Deadline</TableHead>
+            <TableHead>Priorität</TableHead>
+            <TableHead>Empfänger</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead>Aktionen</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {todos.map((todo) => (
+          {localTodos.map((todo) => (
             <TableRow key={todo.id}>
               <TableCell>
-                <Checkbox
-                  checked={todo.status === "inactive"}
-                  onCheckedChange={(checked) =>
-                    handleStatusChange(todo.id, checked ? "inactive" : "active")
+                <Input
+                  value={todo.description}
+                  onChange={(e) =>
+                    handleUpdateTodo(todo.id, { description: e.target.value })
                   }
                 />
               </TableCell>
-              <TableCell>{todo.description}</TableCell>
-              <TableCell>{format(new Date(todo.deadline), "dd.MM.yyyy HH:mm", { locale: de })}</TableCell>
-              <TableCell>{todo.priority}</TableCell>
               <TableCell>
-                {users.find(u => u.email === todo.receiver)?.name || todo.receiver}
+                <DateTimePicker
+                  date={todo.deadline ? new Date(todo.deadline) : undefined}
+                  setDate={(date) =>
+                    handleUpdateTodo(todo.id, { deadline: date?.toISOString() })
+                  }
+                />
               </TableCell>
               <TableCell>
-                <div className="flex gap-2">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => handleDelete(todo.id)}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
+                <Select 
+                  value={todo.priority || "_no_priority"} 
+                  onValueChange={(value) => handleUpdateTodo(todo.id, { priority: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Priorität auswählen" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {priorities && priorities.length > 0 ? (
+                      priorities.map((p) => (
+                        <SelectItem key={p.id} value={p.name || p.id}>
+                          {p.name}
+                        </SelectItem>
+                      ))
+                    ) : (
+                      <SelectItem value="_no_priority">
+                        Keine Prioritäten verfügbar
+                      </SelectItem>
+                    )}
+                  </SelectContent>
+                </Select>
+              </TableCell>
+              <TableCell>
+                <Select 
+                  value={todo.receiver || "_no_users"} 
+                  onValueChange={(value) => handleUpdateTodo(todo.id, { receiver: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Empfänger auswählen" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {users && users.length > 0 ? (
+                      users.map((user) => (
+                        <SelectItem key={user.id} value={user.email || user.id}>
+                          {user.name} ({user.email})
+                        </SelectItem>
+                      ))
+                    ) : (
+                      <SelectItem value="_no_users">
+                        Keine Benutzer verfügbar
+                      </SelectItem>
+                    )}
+                  </SelectContent>
+                </Select>
+              </TableCell>
+              <TableCell>
+                <Select 
+                  value={todo.status} 
+                  onValueChange={(value) => handleUpdateTodo(todo.id, { status: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Status auswählen" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="active">Offen</SelectItem>
+                    <SelectItem value="in_progress">In Bearbeitung</SelectItem>
+                    <SelectItem value="completed">Erledigt</SelectItem>
+                  </SelectContent>
+                </Select>
+              </TableCell>
+              <TableCell>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setTodoToDelete(todo.id)}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
               </TableCell>
             </TableRow>
           ))}
         </TableBody>
       </Table>
+      {todoToDelete !== null && (
+        <div className="mt-4">
+          <p>Sind Sie sicher, dass Sie dieses Todo löschen möchten?</p>
+          <Button onClick={handleDeleteTodo}>Löschen</Button>
+          <Button onClick={() => setTodoToDelete(null)}>Abbrechen</Button>
+        </div>
+      )}
     </div>
   );
 }

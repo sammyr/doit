@@ -1,34 +1,32 @@
 import { create } from 'zustand';
 import { supabase } from '@/lib/supabase';
-import { toast } from 'react-hot-toast';
+import { toast } from '@/components/ui/use-toast';
 
 export interface Settings {
   id: string;
   user_id: string;
-  theme: string;
-  language: string;
-  notifications_enabled: boolean;
-  created_at?: string;
-  updated_at?: string;
+  sender_email: string | null;
+  email_template: string | null;
+  created_at: string;
 }
 
-interface SettingsState {
+interface SettingsStore {
   settings: Settings | null;
-  isLoading: boolean;
+  loading: boolean;
   error: string | null;
   fetchSettings: () => Promise<void>;
   updateSettings: (settings: Partial<Settings>) => Promise<void>;
 }
 
-export const useSettingsStore = create<SettingsState>((set) => ({
+export const useSettingsStore = create<SettingsStore>((set) => ({
   settings: null,
-  isLoading: false,
+  loading: false,
   error: null,
 
   fetchSettings: async () => {
     try {
-      set({ isLoading: true, error: null });
-      
+      set({ loading: true, error: null });
+
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Nicht eingeloggt');
 
@@ -36,61 +34,79 @@ export const useSettingsStore = create<SettingsState>((set) => ({
         .from('settings')
         .select('*')
         .eq('user_id', user.id)
-        .single();
+        .maybeSingle();
 
       if (error) throw error;
 
-      // Wenn keine Einstellungen gefunden wurden, erstelle Standardeinstellungen
-      if (!data) {
-        const { data: newSettings, error: createError } = await supabase
-          .from('settings')
-          .insert([{
-            user_id: user.id,
-            theme: 'light',
-            language: 'de',
-            notifications_enabled: true
-          }])
-          .select()
-          .single();
-
-        if (createError) throw createError;
-        set({ settings: newSettings, isLoading: false });
-        return;
-      }
-
-      set({ settings: data, isLoading: false });
-    } catch (error) {
+      set({ settings: data });
+    } catch (error: any) {
       console.error('Fehler beim Laden der Einstellungen:', error);
-      set({ error: 'Einstellungen konnten nicht geladen werden', isLoading: false });
-      toast.error('Einstellungen konnten nicht geladen werden');
+      set({ error: error.message });
+      toast({
+        title: "Fehler",
+        description: `Fehler beim Laden der Einstellungen: ${error.message}`,
+        variant: "destructive",
+      });
+    } finally {
+      set({ loading: false });
     }
   },
 
-  updateSettings: async (newSettings: Partial<Settings>) => {
+  updateSettings: async (newSettings) => {
     try {
-      set({ isLoading: true, error: null });
-      
+      set({ loading: true, error: null });
+
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Nicht eingeloggt');
 
-      const { data, error } = await supabase
+      const existingSettings = await supabase
         .from('settings')
-        .update({
-          ...newSettings,
-          updated_at: new Date().toISOString()
-        })
+        .select('id')
         .eq('user_id', user.id)
-        .select()
-        .single();
+        .maybeSingle();
 
-      if (error) throw error;
+      let result;
+      
+      if (existingSettings.data) {
+        // Update
+        result = await supabase
+          .from('settings')
+          .update({
+            ...newSettings,
+            updated_at: new Date().toISOString()
+          })
+          .eq('user_id', user.id)
+          .select()
+          .single();
+      } else {
+        // Insert
+        result = await supabase
+          .from('settings')
+          .insert([{
+            ...newSettings,
+            user_id: user.id
+          }])
+          .select()
+          .single();
+      }
 
-      set({ settings: data, isLoading: false });
-      toast.success('Einstellungen wurden gespeichert');
-    } catch (error) {
-      console.error('Fehler beim Aktualisieren der Einstellungen:', error);
-      set({ error: 'Einstellungen konnten nicht aktualisiert werden', isLoading: false });
-      toast.error('Einstellungen konnten nicht gespeichert werden');
+      if (result.error) throw result.error;
+
+      set({ settings: result.data });
+      toast({
+        title: "Erfolg",
+        description: "Einstellungen wurden erfolgreich gespeichert",
+      });
+    } catch (error: any) {
+      console.error('Fehler beim Speichern der Einstellungen:', error);
+      set({ error: error.message });
+      toast({
+        title: "Fehler",
+        description: `Fehler beim Speichern der Einstellungen: ${error.message}`,
+        variant: "destructive",
+      });
+    } finally {
+      set({ loading: false });
     }
   }
 }));

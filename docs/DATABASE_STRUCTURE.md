@@ -34,7 +34,23 @@ Speichert die verfügbaren Prioritäten.
 |-------------|----------|--------------------------------|
 | id          | uuid     | Primärschlüssel                |
 | name        | text     | Name der Priorität             |
+| email_notification | boolean | E-Mail-Benachrichtigung    |
+| sms_notification | boolean | SMS-Benachrichtigung        |
+| whatsapp_notification | boolean | WhatsApp-Benachrichtigung |
+| user_id     | uuid     | Referenz zum Ersteller         |
 | created_at  | timestamptz | Erstellungszeitpunkt        |
+
+### settings
+Speichert die Einstellungen der Benutzer.
+
+| Spalte      | Typ      | Beschreibung                    |
+|-------------|----------|--------------------------------|
+| id          | uuid     | Primärschlüssel                |
+| user_id     | uuid     | Referenz zum Benutzer          |
+| sender_email | text     | Absender-E-Mail-Adresse        |
+| email_template | text     | E-Mail-Vorlage               |
+| created_at  | timestamptz | Erstellungszeitpunkt        |
+| updated_at  | timestamptz | Aktualisierungszeitpunkt    |
 
 ## Row Level Security (RLS)
 
@@ -42,15 +58,11 @@ Speichert die verfügbaren Prioritäten.
 ```sql
 ALTER TABLE public.contacts ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Öffentlicher Lesezugriff für Kontakte"
-ON public.contacts FOR SELECT
+CREATE POLICY "Öffentlicher Lesezugriff für alle authentifizierten Benutzer"
+ON public.contacts
+FOR SELECT
 TO authenticated
 USING (true);
-
-CREATE POLICY "Authentifizierte Benutzer können Kontakte erstellen"
-ON public.contacts FOR INSERT
-TO authenticated
-WITH CHECK (true);
 ```
 
 ### todos
@@ -61,7 +73,7 @@ CREATE POLICY "Benutzer können nur eigene Todos sehen"
 ON public.todos
 FOR SELECT
 TO authenticated
-USING (auth.uid() = user_id OR user_id IS NULL);
+USING (auth.uid() = user_id);
 
 CREATE POLICY "Benutzer können eigene Todos erstellen"
 ON public.todos
@@ -73,8 +85,7 @@ CREATE POLICY "Benutzer können eigene Todos aktualisieren"
 ON public.todos
 FOR UPDATE
 TO authenticated
-USING (auth.uid() = user_id)
-WITH CHECK (auth.uid() = user_id);
+USING (auth.uid() = user_id);
 
 CREATE POLICY "Benutzer können eigene Todos löschen"
 ON public.todos
@@ -87,17 +98,67 @@ USING (auth.uid() = user_id);
 ```sql
 ALTER TABLE public.priorities ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Öffentlicher Lesezugriff für Prioritäten"
-ON public.priorities FOR SELECT
+CREATE POLICY "Benutzer können ihre eigenen Prioritäten sehen"
+ON public.priorities
+FOR SELECT
 TO authenticated
-USING (true);
+USING (auth.uid() = user_id);
+
+CREATE POLICY "Benutzer können Prioritäten erstellen"
+ON public.priorities
+FOR INSERT
+TO authenticated
+WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Benutzer können ihre eigenen Prioritäten aktualisieren"
+ON public.priorities
+FOR UPDATE
+TO authenticated
+USING (auth.uid() = user_id);
+
+CREATE POLICY "Benutzer können ihre eigenen Prioritäten löschen"
+ON public.priorities
+FOR DELETE
+TO authenticated
+USING (auth.uid() = user_id);
+```
+
+### settings
+```sql
+ALTER TABLE public.settings ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Benutzer können nur ihre eigenen Einstellungen sehen"
+ON public.settings
+FOR SELECT
+TO authenticated
+USING (auth.uid() = user_id);
+
+CREATE POLICY "Benutzer können ihre Einstellungen erstellen"
+ON public.settings
+FOR INSERT
+TO authenticated
+WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Benutzer können ihre eigenen Einstellungen aktualisieren"
+ON public.settings
+FOR UPDATE
+TO authenticated
+USING (auth.uid() = user_id);
+
+CREATE POLICY "Benutzer können ihre eigenen Einstellungen löschen"
+ON public.settings
+FOR DELETE
+TO authenticated
+USING (auth.uid() = user_id);
 ```
 
 ## Beziehungen
 
-- `todos.receiver` referenziert `contacts.email`
-- `todos.priority` referenziert `priorities.name`
-- `todos.user_id` referenziert `auth.users.id`
+- `todos.user_id` -> `auth.users(id)`: Jedes Todo gehört zu einem Benutzer
+- `priorities.user_id` -> `auth.users(id)`: Jede Priorität gehört zu einem Benutzer
+- `todos.priority` -> Referenz auf `priorities.name`
+- `todos.receiver` -> Referenz auf `contacts.email`
+- `settings.user_id` -> `auth.users(id)`: Jede Einstellung gehört zu einem Benutzer
 
 ## Funktionen der Tabellen
 
@@ -117,6 +178,10 @@ USING (true);
 - Stellt konsistente Prioritätswerte sicher
 - Ermöglicht einfache Erweiterung der Prioritäten
 
+### settings
+- Speichert die Einstellungen der Benutzer
+- Ermöglicht die Anpassung von Einstellungen pro Benutzer
+
 ## Indices
 
 ```sql
@@ -129,6 +194,10 @@ CREATE INDEX IF NOT EXISTS contacts_email_idx
     ON public.contacts(email);
 CREATE INDEX IF NOT EXISTS priorities_name_idx 
     ON public.priorities(name);
+CREATE INDEX IF NOT EXISTS priorities_user_id_idx 
+    ON public.priorities(user_id);
+CREATE INDEX IF NOT EXISTS settings_user_id_idx 
+    ON public.settings(user_id);
 ```
 
 ## Validierungen
@@ -153,7 +222,19 @@ CREATE INDEX IF NOT EXISTS priorities_name_idx
 ### priorities
 - `id`: Automatisch generierte UUID
 - `name`: Darf nicht leer sein
+- `email_notification`: Optional
+- `sms_notification`: Optional
+- `whatsapp_notification`: Optional
+- `user_id`: Muss eine gültige UUID eines authentifizierten Benutzers sein
 - `created_at`: Wird automatisch auf den aktuellen Zeitpunkt gesetzt
+
+### settings
+- `id`: Automatisch generierte UUID
+- `user_id`: Muss eine gültige UUID eines authentifizierten Benutzers sein
+- `sender_email`: Optional
+- `email_template`: Optional
+- `created_at`: Wird automatisch auf den aktuellen Zeitpunkt gesetzt
+- `updated_at`: Wird automatisch auf den aktuellen Zeitpunkt gesetzt
 
 ## Beispiel-Queries
 
@@ -218,25 +299,48 @@ CREATE INDEX todos_user_id_idx ON todos(user_id);
 CREATE TABLE priorities (
     id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
     name text NOT NULL,
+    email_notification boolean DEFAULT false,
+    sms_notification boolean DEFAULT false,
+    whatsapp_notification boolean DEFAULT false,
+    user_id uuid REFERENCES auth.users(id) ON DELETE CASCADE,
     created_at timestamptz DEFAULT now()
 );
 
 -- Index für bessere Performance
 CREATE INDEX priorities_name_idx ON priorities(name);
+CREATE INDEX priorities_user_id_idx ON priorities(user_id);
+```
+
+### settings
+```sql
+CREATE TABLE settings (
+    id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+    user_id uuid REFERENCES auth.users(id) ON DELETE CASCADE,
+    sender_email text,
+    email_template text,
+    created_at timestamptz DEFAULT now(),
+    updated_at timestamptz
+);
+
+-- Index für bessere Performance
+CREATE INDEX settings_user_id_idx ON settings(user_id);
 ```
 
 ## Beziehungen
 
 1. `todos.user_id` -> `auth.users(id)`: Jedes Todo gehört zu einem Benutzer
-2. `todos.priority` -> Referenz auf `priorities.name`
-3. `todos.receiver` -> Referenz auf `contacts.email`
+2. `priorities.user_id` -> `auth.users(id)`: Jede Priorität gehört zu einem Benutzer
+3. `todos.priority` -> Referenz auf `priorities.name`
+4. `todos.receiver` -> Referenz auf `contacts.email`
+5. `settings.user_id` -> `auth.users(id)`: Jede Einstellung gehört zu einem Benutzer
 
 ## Sicherheit
 
 ### Row Level Security (RLS)
 - Aktiviert für alle Tabellen
-- Benutzer können nur ihre eigenen Todos sehen und verwalten
-- Kontakte und Prioritäten sind für alle authentifizierten Benutzer lesbar
+- Benutzer können nur ihre eigenen Todos und Prioritäten sehen und verwalten
+- Kontakte sind für alle authentifizierten Benutzer lesbar
+- Einstellungen sind nur für den jeweiligen Benutzer sichtbar
 
 ### Authentifizierung
 - Verwendet Supabase Auth
@@ -245,8 +349,10 @@ CREATE INDEX priorities_name_idx ON priorities(name);
 
 ## Indizes
 - `todos_user_id_idx`: Optimiert Abfragen nach Benutzer-Todos
+- `priorities_user_id_idx`: Optimiert Abfragen nach Benutzer-Prioritäten
 - `contacts_name_idx`: Optimiert Suche nach Kontaktnamen
 - `priorities_name_idx`: Optimiert Suche nach Prioritätsnamen
+- `settings_user_id_idx`: Optimiert Suche nach Benutzer-Einstellungen
 
 ## Best Practices
 
@@ -254,11 +360,12 @@ CREATE INDEX priorities_name_idx ON priorities(name);
 1. Verwende UUIDs für Primärschlüssel
 2. Setze `ON DELETE CASCADE` für Fremdschlüssel
 3. Verwende Timestamps für Audit-Trails
+4. Benutzer-Isolation durch `user_id`
 
 ### Performance
 1. Indizes auf häufig abgefragte Spalten
 2. Optimierte RLS-Policies
-3. Korrekte Datentypen (uuid, text, timestamptz)
+3. Korrekte Datentypen (uuid, text, timestamptz, boolean)
 
 ### Sicherheit
 1. RLS für Datenisolierung

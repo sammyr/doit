@@ -2,34 +2,46 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { useUserStore } from "@/store/users";
-import { Card } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { supabase } from "@/lib/supabase";
+import { useToast } from "@/components/ui/use-toast";
 
 export default function LogoutPage() {
   const router = useRouter();
-  const { clearUser } = useUserStore();
+  const { toast } = useToast();
 
   useEffect(() => {
     const logout = async () => {
-      clearUser();
-      router.push("/login");
+      try {
+        const { error } = await supabase.auth.signOut();
+        if (error) throw error;
+        
+        // Zeige Erfolgsmeldung
+        toast({
+          title: "Erfolgreich abgemeldet",
+          description: "Sie wurden erfolgreich ausgeloggt.",
+        });
+
+        // Weiterleitung zur Login-Seite
+        router.push("/login");
+      } catch (error: any) {
+        console.error("Fehler beim Ausloggen:", error);
+        toast({
+          title: "Fehler beim Abmelden",
+          description: error.message || "Ein unerwarteter Fehler ist aufgetreten",
+          variant: "destructive",
+        });
+      }
     };
 
     logout();
-  }, [clearUser, router]);
+  }, [router, toast]);
 
   return (
-    <div className="flex items-center justify-center min-h-screen bg-background">
-      <Card className="w-full max-w-md p-6 text-center">
-        <h1 className="text-2xl font-bold mb-4">Logging out...</h1>
-        <p className="text-muted-foreground mb-6">
-          You are being redirected to the login page.
-        </p>
-        <Button variant="outline" onClick={() => router.push("/login")}>
-          Click here if you are not redirected
-        </Button>
-      </Card>
+    <div className="flex h-screen items-center justify-center">
+      <div className="text-center">
+        <h1 className="text-2xl font-bold mb-4">Abmelden...</h1>
+        <p>Sie werden abgemeldet und weitergeleitet.</p>
+      </div>
     </div>
   );
 }

@@ -28,3 +28,13 @@ export const supabase = createBrowserClient(
     }
   }
 );
+
+// Funktion zum Neuladen des Schema-Cache
+export const reloadSchemaCache = async () => {
+  try {
+    await supabase.schema.reload();
+    console.log('Schema-Cache wurde erfolgreich neu geladen');
+  } catch (error) {
+    console.error('Fehler beim Neuladen des Schema-Cache:', error);
+  }
+};

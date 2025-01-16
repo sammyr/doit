@@ -1,146 +1,83 @@
 import { create } from 'zustand';
 import { supabase } from '@/lib/supabase';
-import { User } from '@supabase/supabase-js';
-import { toast } from 'sonner';
+import { toast } from '@/components/ui/use-toast';
 
 interface AuthState {
-  user: User | null;
+  user: any | null;
   loading: boolean;
-  signUp: (email: string, password: string, name: string) => Promise<{ success: boolean; message: string }>;
-  signIn: (email: string, password: string) => Promise<{ success: boolean; message: string }>;
+  error: string | null;
+  signIn: (email: string, password: string, rememberMe?: boolean) => Promise<{ success: boolean }>;
   signOut: () => Promise<void>;
-  resetPassword: (email: string) => Promise<void>;
-  updateProfile: (data: { name?: string; email?: string }) => Promise<void>;
+  checkSession: () => Promise<boolean>;
 }
 
-export const useAuthStore = create<AuthState>((set, get) => ({
+export const useAuthStore = create<AuthState>((set) => ({
   user: null,
-  loading: true,
+  loading: false,
+  error: null,
 
-  signUp: async (email: string, password: string, name: string) => {
+  signIn: async (email: string, password: string, rememberMe = false) => {
+    set({ loading: true, error: null });
     try {
-      const { data, error } = await supabase.auth.signUp({
+      const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
         options: {
-          data: {
-            name,
-          },
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
-        },
-      });
-      
-      if (error) {
-        if (error.message === 'Email not confirmed') {
-          toast.error('Bitte bestätigen Sie Ihre E-Mail-Adresse');
-          return { success: false, message: 'Bitte bestätigen Sie Ihre E-Mail-Adresse' };
+          persistSession: rememberMe // Session nur speichern wenn "Angemeldet bleiben" aktiviert ist
         }
-        toast.error(error.message);
-        return { success: false, message: error.message };
-      }
-      
-      if (data.user) {
-        set({ user: data.user });
-        toast.success('Registrierung erfolgreich! Bitte prüfen Sie Ihre E-Mails für den Bestätigungslink.');
-        return { success: true, message: 'Registrierung erfolgreich!' };
-      }
-
-      return { success: false, message: 'Unbekannter Fehler bei der Registrierung' };
-    } catch (error: any) {
-      toast.error(error.message || 'Ein Fehler ist aufgetreten');
-      return { success: false, message: error.message || 'Ein Fehler ist aufgetreten' };
-    }
-  },
-
-  signIn: async (email: string, password: string) => {
-    try {
-      const { data: { session, user }, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
       });
-      
-      if (error) {
-        if (error.message === 'Email not confirmed') {
-          toast.error('Bitte bestätigen Sie zuerst Ihre E-Mail-Adresse');
-          return { success: false, message: 'Bitte bestätigen Sie zuerst Ihre E-Mail-Adresse' };
-        }
-        toast.error(error.message);
-        return { success: false, message: error.message };
-      }
-      
-      if (user && session) {
-        set({ user, loading: false });
-        toast.success('Erfolgreich eingeloggt!');
-        return { success: true, message: 'Erfolgreich eingeloggt!' };
-      }
 
-      return { success: false, message: 'Unbekannter Fehler beim Login' };
+      if (error) throw error;
+
+      set({ user: data.user });
+      toast({
+        title: "Erfolgreich angemeldet",
+        description: "Willkommen zurück!",
+      });
+      return { success: true };
     } catch (error: any) {
-      toast.error(error.message || 'Ein Fehler ist aufgetreten');
-      return { success: false, message: error.message || 'Ein Fehler ist aufgetreten' };
+      set({ error: error.message });
+      toast({
+        title: "Fehler beim Anmelden",
+        description: error.message,
+        variant: "destructive",
+      });
+      return { success: false };
+    } finally {
+      set({ loading: false });
     }
   },
 
   signOut: async () => {
     try {
       const { error } = await supabase.auth.signOut();
-      if (error) {
-        toast.error(error.message);
-        throw error;
-      }
+      if (error) throw error;
+      
       set({ user: null });
-      toast.success('Erfolgreich ausgeloggt!');
+      toast({
+        title: "Erfolgreich abgemeldet",
+        description: "Auf Wiedersehen!",
+      });
     } catch (error: any) {
-      toast.error(error.message || 'Fehler beim Ausloggen');
-      throw error;
+      set({ error: error.message });
+      toast({
+        title: "Fehler beim Abmelden",
+        description: error.message,
+        variant: "destructive",
+      });
     }
   },
 
-  resetPassword: async (email: string) => {
+  checkSession: async () => {
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/auth/reset-password`,
-      });
-      if (error) {
-        toast.error(error.message);
-        throw error;
-      }
-      toast.success('Passwort-Reset E-Mail wurde gesendet!');
+      const { data: { session } } = await supabase.auth.getSession();
+      set({ user: session?.user || null });
+      return !!session;
     } catch (error: any) {
-      toast.error(error.message || 'Fehler beim Zurücksetzen des Passworts');
-      throw error;
+      set({ error: error.message });
+      return false;
     }
-  },
-
-  updateProfile: async (data) => {
-    try {
-      const { error } = await supabase.auth.updateUser({
-        data,
-      });
-      
-      if (error) {
-        toast.error(error.message);
-        throw error;
-      }
-      
-      const user = get().user;
-      if (user) {
-        set({
-          user: {
-            ...user,
-            user_metadata: {
-              ...user.user_metadata,
-              ...data,
-            },
-          },
-        });
-        toast.success('Profil erfolgreich aktualisiert!');
-      }
-    } catch (error: any) {
-      toast.error(error.message || 'Fehler beim Aktualisieren des Profils');
-      throw error;
-    }
-  },
+  }
 }));
 
 // Auth state listener
